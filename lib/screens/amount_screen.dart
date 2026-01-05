@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
+import '../services/contact_service.dart';
 
 class AmountScreen extends StatefulWidget {
   const AmountScreen({super.key});
@@ -13,10 +15,15 @@ class _AmountScreenState extends State<AmountScreen> {
   String? _pn;
   String? _upiId;
   String? _upiUri;
+  Contact? _matchedContact;
+  bool _isNumberUpi = false;
+  bool _hasChecked = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_hasChecked) return;
+
     final args = ModalRoute.of(context)?.settings.arguments as Map?;
     _upiUri = args?['upiUri'];
     if (_upiUri != null) {
@@ -27,6 +34,55 @@ class _AmountScreenState extends State<AmountScreen> {
       _upiId = args?['upiId'];
       _pn = args?['pn'];
     }
+
+    if (_upiId != null) {
+      _hasChecked = true;
+      _performContactCheck();
+    }
+  }
+
+  Future<void> _performContactCheck() async {
+    if (_upiId == null) return;
+
+    _isNumberUpi = ContactService.startsWithNumber(_upiId!);
+
+    if (_isNumberUpi) {
+      // Check contacts
+      final contact = await ContactService.findContactByPhone(_upiId!);
+      if (mounted) {
+        setState(() {
+          _matchedContact = contact;
+        });
+      }
+    } else {
+      // Alphabet/Email UPI - Show popup
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showKnowledgePopup();
+      });
+    }
+  }
+
+  void _showKnowledgePopup() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text("Verify Recipient"),
+        content: Text(
+          "You are paying to $_upiId. Whether you know the concerned person?",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("NO, I DON'T KNOW"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("YES, I KNOW"),
+          ),
+        ],
+      ),
+    );
   }
 
   void _proceed() {
@@ -89,27 +145,68 @@ class _AmountScreenState extends State<AmountScreen> {
                 children: [
                   CircleAvatar(
                     backgroundColor: Colors.blue.shade100,
-                    child: Text(_upiId?.substring(0, 1).toUpperCase() ?? "U"),
+                    backgroundImage: (_matchedContact?.photo != null)
+                        ? MemoryImage(_matchedContact!.photo!)
+                        : null,
+                    child: (_matchedContact?.photo == null)
+                        ? Text(_upiId?.substring(0, 1).toUpperCase() ?? "U")
+                        : null,
                   ),
                   const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Paying to",
-                        style: TextStyle(
-                          color: Colors.grey.shade600,
-                          fontSize: 12,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              "Paying to",
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 12,
+                              ),
+                            ),
+                            if (_matchedContact != null) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade100,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  "In Contacts",
+                                  style: TextStyle(
+                                    color: Colors.green.shade700,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                      ),
-                      Text(
-                        _upiId ?? "Receiver",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
+                        Text(
+                          _matchedContact?.displayName ?? _upiId ?? "Receiver",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                    ],
+                        if (_matchedContact != null)
+                          Text(
+                            _upiId ?? "",
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ],
               ),
