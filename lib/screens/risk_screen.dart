@@ -3,7 +3,8 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import '../database/app_database.dart';
 import '../database/entities/scanned_qr.dart';
-import '../services/risk_services.dart';
+import '../services/ml_service.dart';
+import '../database/entities/ml_feature.dart';
 
 class RiskScreen extends StatefulWidget {
   const RiskScreen({super.key});
@@ -13,107 +14,280 @@ class RiskScreen extends StatefulWidget {
 }
 
 class _RiskScreenState extends State<RiskScreen> {
-  final RiskService _riskService = RiskService();
+  bool _isAnalyzing = true;
+  int? _mlResult;
+  String _statusText = "Analyzing transaction risk...";
+
+  // State variables for debugging
+  double _amount = 0;
+  bool _isInContacts = false;
+  int _isNewReceiver = 1;
+  int _scanFrequency = 1;
 
   @override
   void initState() {
     super.initState();
-    // Start analysis after build
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _startAnalysis();
+      _runMLInference();
     });
   }
 
-  Future<void> _startAnalysis() async {
+  Future<void> _runMLInference() async {
     try {
       final args = ModalRoute.of(context)!.settings.arguments as Map;
       final String upiId = args['upiId'];
       final String amountStr = args['amount'];
       final double amount = double.tryParse(amountStr) ?? 0.0;
+      final String pn = args['pn'] ?? "Unknown";
+      final bool isInContacts = args['isInContacts'] ?? false;
+      final String qrType = args['qrType'] ?? 'P2P';
 
-      // 1. Analyze Risk
-      int riskScore = await _riskService.analyzeRisk(upiId, amount);
+      final db = Provider.of<AppDatabase>(context, listen: false);
+      final mlService = MlService(db);
 
-      // 2. Save to Database (Non-blocking ideally, but we await for simplicity. Catch errors separately)
+      // 2. Extract Features & Predict
+      // We do history lookup first to see if it's new
+      final history = await db.scannedQrDao.getScansByUpi(upiId);
+      final isNewReceiver = (history.isEmpty) ? 1 : 0;
+
+      // Get current hour
+      final hourOfDay = DateTime.now().hour;
+
+      // Get scan frequency (last 24h)
+      final oneDayAgo = DateTime.now()
+          .subtract(const Duration(hours: 24))
+          .millisecondsSinceEpoch;
+      final recentCount =
+          await db.mlFeatureDao.getRecentScanCount(oneDayAgo) ?? 0;
+      final scanFrequency = recentCount + 1;
+
+      // Update state for UI visibility
       if (mounted) {
-        try {
-          final db = Provider.of<AppDatabase>(context, listen: false);
-          final String pn = args['pn'] ?? "Unknown";
-
-          final scan = ScannedQr(
-            upiId: upiId,
-            payeeName: pn,
-            qrType: 'P2P',
-            scanTime: DateTime.now().millisecondsSinceEpoch,
-            amount: amount,
-            riskResult: riskScore < 50 ? 'SAFE' : 'WARN',
-          );
-
-          await db.scannedQrDao.insertScan(scan);
-        } catch (dbError) {
-          debugPrint("Database Error: $dbError");
-          // Proceed even if DB fails
-        }
+        setState(() {
+          _amount = amount;
+          _isInContacts = isInContacts;
+          _isNewReceiver = isNewReceiver;
+          _scanFrequency = scanFrequency;
+        });
       }
+
+      // 1. Initial artificial delay for "Scanning" feel
+      await Future.delayed(1500.ms);
+
+      final mlFeature = MlFeature(
+        scan_id: 0, // Placeholder
+        amount: amount,
+        is_in_contacts: isInContacts ? 1 : 0,
+        qr_type: (qrType.toUpperCase().contains('MERCHANT')) ? 1 : 0,
+        hour_of_day: hourOfDay,
+        is_new_receiver: isNewReceiver,
+        scan_frequency: scanFrequency,
+      );
+
+      final int prediction = await mlService.predict(mlFeature);
 
       if (!mounted) return;
 
-      // 3. Navigate
-      if (riskScore < 50) {
-        Navigator.pushReplacementNamed(context, '/redirect', arguments: args);
-      } else {
-        Navigator.pushReplacementNamed(
-          context,
-          '/warning',
-          arguments: {...args, 'riskScore': riskScore},
-        );
-      }
+      setState(() {
+        _mlResult = prediction;
+        _isAnalyzing = false;
+        _statusText = prediction == 1
+            ? "Fraud Risk Detected!"
+            : "Transaction Verified Safe";
+      });
+
+      // 3. Save to Database
+      final scan = ScannedQr(
+        upiId: upiId,
+        payeeName: pn,
+        qrType: qrType,
+        scanTime: DateTime.now().millisecondsSinceEpoch,
+        amount: amount,
+        riskResult: prediction == 1 ? 'WARN' : 'SAFE',
+        isInContacts: isInContacts,
+      );
+
+      final int scanId = await db.scannedQrDao.insertScan(scan);
+
+      final finalFeature = MlFeature(
+        scan_id: scanId,
+        amount: amount,
+        is_in_contacts: mlFeature.is_in_contacts,
+        qr_type: mlFeature.qr_type,
+        hour_of_day: hourOfDay,
+        is_new_receiver: isNewReceiver,
+        scan_frequency: scanFrequency,
+        label: prediction,
+      );
+      await db.mlFeatureDao.insertMlFeature(finalFeature);
+
+      debugPrint(
+        "ML Prediction: ${prediction == 1 ? 'FRAUD' : 'SAFE'} (Result: $prediction)",
+      );
     } catch (e) {
-      debugPrint("Risk Analysis Error: $e");
-      // Fallback: Just go to redirect if something blows up
-      if (mounted) {
-        final args = ModalRoute.of(context)?.settings.arguments as Map? ?? {};
-        Navigator.pushReplacementNamed(context, '/redirect', arguments: args);
-      }
+      debugPrint("ML Error: $e");
+    }
+  }
+
+  void _proceed() {
+    final args = ModalRoute.of(context)!.settings.arguments as Map;
+    if (_mlResult == 0) {
+      Navigator.pushReplacementNamed(context, '/redirect', arguments: args);
+    } else {
+      Navigator.pushReplacementNamed(
+        context,
+        '/warning',
+        arguments: {...args, 'riskScore': 90},
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final bool isFraud = _mlResult == 1;
+
     return Scaffold(
+      backgroundColor: Colors.white,
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(
-              height: 100,
-              width: 100,
-              child: CircularProgressIndicator(
-                strokeWidth: 8,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Visual Indicator
+              if (_isAnalyzing)
+                const SizedBox(
+                  height: 120,
+                  width: 120,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 10,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                  ),
+                ).animate().scale(duration: 400.ms)
+              else
+                Icon(
+                  isFraud ? Icons.report_problem : Icons.check_circle,
+                  size: 120,
+                  color: isFraud ? Colors.red : Colors.green,
+                ).animate().scale(curve: Curves.elasticOut),
+
+              const SizedBox(height: 48),
+
+              // Status Text
+              Text(
+                    _statusText,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: _isAnalyzing
+                          ? Colors.black87
+                          : (isFraud ? Colors.red : Colors.green),
+                    ),
+                  )
+                  .animate(target: _isAnalyzing ? 1 : 0)
+                  .shimmer(duration: 2.seconds),
+
+              const SizedBox(height: 16),
+
+              // Subtitle
+              Text(
+                _isAnalyzing
+                    ? "Our ML model is checking transaction patterns..."
+                    : (isFraud
+                          ? "Pattern matches known fraud techniques."
+                          : "No abnormalities found. Verified by ONNX Runtime."),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
               ),
-            ),
-            const SizedBox(height: 40),
-            Text(
-                  "Analyzing transaction risk...",
-                  style: Theme.of(context).textTheme.titleLarge,
-                )
-                .animate(onPlay: (controller) => controller.repeat())
-                .shimmer(duration: 2.seconds, color: Colors.blue.shade200),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                "Isolation Forest model runs here (mocked)",
-                style: TextStyle(fontFamily: 'monospace', fontSize: 12),
-              ),
-            ),
-          ],
+
+              const SizedBox(height: 40),
+
+              // Technical Details
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  children: [
+                    _buildFeatureRow("Model Type", "ONNX Cold Start V1"),
+                    const Divider(),
+                    _buildFeatureRow(
+                      "Amount Analyzed",
+                      "₹${_amount.toStringAsFixed(0)}",
+                    ),
+                    const Divider(),
+                    _buildFeatureRow(
+                      "In Contacts?",
+                      _isInContacts ? "Yes (1)" : "No (0)",
+                    ),
+                    const Divider(),
+                    _buildFeatureRow(
+                      "New Receiver?",
+                      _isNewReceiver == 1 ? "Yes (1)" : "No (0)",
+                    ),
+                    const Divider(),
+                    _buildFeatureRow(
+                      "Recent Frequency",
+                      "$_scanFrequency scans",
+                    ),
+                  ],
+                ),
+              ).animate().fadeIn(delay: 600.ms).slideY(begin: 0.2, end: 0),
+
+              const SizedBox(height: 40),
+
+              // Action Button
+              if (!_isAnalyzing)
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: _proceed,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isFraud ? Colors.red : Colors.blue,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      isFraud
+                          ? "View Warning Details"
+                          : "Proceed to Secure Payment",
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ).animate().fadeIn().scale(delay: 200.ms),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildFeatureRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+          Text(
+            value,
+            style: TextStyle(
+              color: Colors.blue.shade700,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -18,6 +18,8 @@ class _AmountScreenState extends State<AmountScreen> {
   Contact? _matchedContact;
   bool _isNumberUpi = false;
   bool _hasChecked = false;
+  String _qrType = 'P2P';
+  bool _userConfirmedKnowledge = false;
 
   @override
   void didChangeDependencies() {
@@ -30,9 +32,14 @@ class _AmountScreenState extends State<AmountScreen> {
       final uri = Uri.tryParse(_upiUri!);
       _upiId = uri?.queryParameters['pa'];
       _pn = uri?.queryParameters['pn'];
+      // MC (Merchant Code) presence indicates a merchant QR
+      _qrType = uri?.queryParameters.containsKey('mc') == true
+          ? 'MERCHANT'
+          : 'P2P';
     } else {
       _upiId = args?['upiId'];
       _pn = args?['pn'];
+      _qrType = 'P2P'; // Manual entry is usually P2P
     }
 
     if (_upiId != null) {
@@ -54,12 +61,12 @@ class _AmountScreenState extends State<AmountScreen> {
           _matchedContact = contact;
         });
       }
-    } else {
-      // Alphabet/Email UPI - Show popup
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showKnowledgePopup();
-      });
     }
+
+    // Always show popup for verification as requested
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showKnowledgePopup();
+    });
   }
 
   void _showKnowledgePopup() {
@@ -73,11 +80,17 @@ class _AmountScreenState extends State<AmountScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              setState(() => _userConfirmedKnowledge = false);
+              Navigator.pop(context);
+            },
             child: const Text("NO, I DON'T KNOW"),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              setState(() => _userConfirmedKnowledge = true);
+              Navigator.pop(context);
+            },
             child: const Text("YES, I KNOW"),
           ),
         ],
@@ -122,6 +135,10 @@ class _AmountScreenState extends State<AmountScreen> {
         'upiId': upiId,
         'amount': amount,
         'pn': pn,
+        'isInContacts': _isNumberUpi
+            ? (_matchedContact != null)
+            : _userConfirmedKnowledge,
+        'qrType': _qrType,
       },
     );
   }

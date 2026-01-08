@@ -82,13 +82,15 @@ class _$AppDatabase extends AppDatabase {
 
   FraudFeedbackDao? _fraudFeedbackDaoInstance;
 
+  MlFeatureDao? _mlFeatureDaoInstance;
+
   Future<sqflite.Database> open(
     String path,
     List<Migration> migrations, [
     Callback? callback,
   ]) async {
     final databaseOptions = sqflite.OpenDatabaseOptions(
-      version: 1,
+      version: 4,
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
         await callback?.onConfigure?.call(database);
@@ -104,7 +106,7 @@ class _$AppDatabase extends AppDatabase {
       },
       onCreate: (database, version) async {
         await database.execute(
-            'CREATE TABLE IF NOT EXISTS `scanned_qr` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `upi_id` TEXT NOT NULL, `payee_name` TEXT NOT NULL, `qr_type` TEXT NOT NULL, `scan_time` INTEGER NOT NULL, `amount` REAL, `risk_result` TEXT NOT NULL)');
+            'CREATE TABLE IF NOT EXISTS `scanned_qr` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `upi_id` TEXT NOT NULL, `payee_name` TEXT NOT NULL, `qr_type` TEXT NOT NULL, `scan_time` INTEGER NOT NULL, `amount` REAL, `risk_result` TEXT NOT NULL, `is_in_contacts` INTEGER NOT NULL)');
         await database.execute(
             'CREATE TABLE IF NOT EXISTS `fraud_reference` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `upi_hash` TEXT NOT NULL, `fraud_type` TEXT NOT NULL, `risk_score` INTEGER NOT NULL, `last_updated` INTEGER NOT NULL)');
         await database.execute(
@@ -113,6 +115,8 @@ class _$AppDatabase extends AppDatabase {
             'CREATE TABLE IF NOT EXISTS `fraud_keywords` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `keyword` TEXT NOT NULL, `category` TEXT NOT NULL, `risk_weight` INTEGER NOT NULL)');
         await database.execute(
             'CREATE TABLE IF NOT EXISTS `fraud_feedback` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `upi_hash` TEXT NOT NULL, `was_fraud` INTEGER NOT NULL, `user_action` TEXT NOT NULL, `reported_time` INTEGER NOT NULL)');
+        await database.execute(
+            'CREATE TABLE IF NOT EXISTS `ml_features` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `scan_id` INTEGER NOT NULL, `amount` REAL NOT NULL, `is_in_contacts` INTEGER NOT NULL, `qr_type` INTEGER NOT NULL, `hour_of_day` INTEGER NOT NULL, `is_new_receiver` INTEGER NOT NULL, `scan_frequency` INTEGER NOT NULL, `label` INTEGER, FOREIGN KEY (`scan_id`) REFERENCES `scanned_qr` (`id`) ON UPDATE NO ACTION ON DELETE CASCADE)');
 
         await callback?.onCreate?.call(database, version);
       },
@@ -148,6 +152,11 @@ class _$AppDatabase extends AppDatabase {
     return _fraudFeedbackDaoInstance ??=
         _$FraudFeedbackDao(database, changeListener);
   }
+
+  @override
+  MlFeatureDao get mlFeatureDao {
+    return _mlFeatureDaoInstance ??= _$MlFeatureDao(database, changeListener);
+  }
 }
 
 class _$ScannedQrDao extends ScannedQrDao {
@@ -165,7 +174,8 @@ class _$ScannedQrDao extends ScannedQrDao {
                   'qr_type': item.qrType,
                   'scan_time': item.scanTime,
                   'amount': item.amount,
-                  'risk_result': item.riskResult
+                  'risk_result': item.riskResult,
+                  'is_in_contacts': item.isInContacts ? 1 : 0
                 });
 
   final sqflite.DatabaseExecutor database;
@@ -187,7 +197,8 @@ class _$ScannedQrDao extends ScannedQrDao {
             qrType: row['qr_type'] as String,
             scanTime: row['scan_time'] as int,
             amount: row['amount'] as double?,
-            riskResult: row['risk_result'] as String));
+            riskResult: row['risk_result'] as String,
+            isInContacts: (row['is_in_contacts'] as int) != 0));
   }
 
   @override
@@ -201,7 +212,8 @@ class _$ScannedQrDao extends ScannedQrDao {
             qrType: row['qr_type'] as String,
             scanTime: row['scan_time'] as int,
             amount: row['amount'] as double?,
-            riskResult: row['risk_result'] as String),
+            riskResult: row['risk_result'] as String,
+            isInContacts: (row['is_in_contacts'] as int) != 0),
         arguments: [upiId]);
   }
 
@@ -223,12 +235,14 @@ class _$ScannedQrDao extends ScannedQrDao {
             qrType: row['qr_type'] as String,
             scanTime: row['scan_time'] as int,
             amount: row['amount'] as double?,
-            riskResult: row['risk_result'] as String));
+            riskResult: row['risk_result'] as String,
+            isInContacts: (row['is_in_contacts'] as int) != 0));
   }
 
   @override
-  Future<void> insertScan(ScannedQr scan) async {
-    await _scannedQrInsertionAdapter.insert(scan, OnConflictStrategy.abort);
+  Future<int> insertScan(ScannedQr scan) {
+    return _scannedQrInsertionAdapter.insertAndReturnId(
+        scan, OnConflictStrategy.abort);
   }
 }
 
@@ -408,5 +422,92 @@ class _$FraudFeedbackDao extends FraudFeedbackDao {
   Future<void> insertFeedback(FraudFeedback feedback) async {
     await _fraudFeedbackInsertionAdapter.insert(
         feedback, OnConflictStrategy.abort);
+  }
+}
+
+class _$MlFeatureDao extends MlFeatureDao {
+  _$MlFeatureDao(
+    this.database,
+    this.changeListener,
+  )   : _queryAdapter = QueryAdapter(database),
+        _mlFeatureInsertionAdapter = InsertionAdapter(
+            database,
+            'ml_features',
+            (MlFeature item) => <String, Object?>{
+                  'id': item.id,
+                  'scan_id': item.scan_id,
+                  'amount': item.amount,
+                  'is_in_contacts': item.is_in_contacts,
+                  'qr_type': item.qr_type,
+                  'hour_of_day': item.hour_of_day,
+                  'is_new_receiver': item.is_new_receiver,
+                  'scan_frequency': item.scan_frequency,
+                  'label': item.label
+                });
+
+  final sqflite.DatabaseExecutor database;
+
+  final StreamController<String> changeListener;
+
+  final QueryAdapter _queryAdapter;
+
+  final InsertionAdapter<MlFeature> _mlFeatureInsertionAdapter;
+
+  @override
+  Future<List<MlFeature>> getAllMlFeatures() async {
+    return _queryAdapter.queryList('SELECT * FROM ml_features ORDER BY id DESC',
+        mapper: (Map<String, Object?> row) => MlFeature(
+            id: row['id'] as int?,
+            scan_id: row['scan_id'] as int,
+            amount: row['amount'] as double,
+            is_in_contacts: row['is_in_contacts'] as int,
+            qr_type: row['qr_type'] as int,
+            hour_of_day: row['hour_of_day'] as int,
+            is_new_receiver: row['is_new_receiver'] as int,
+            scan_frequency: row['scan_frequency'] as int,
+            label: row['label'] as int?));
+  }
+
+  @override
+  Future<MlFeature?> findByScanId(int scanId) async {
+    return _queryAdapter.query('SELECT * FROM ml_features WHERE scan_id = ?1',
+        mapper: (Map<String, Object?> row) => MlFeature(
+            id: row['id'] as int?,
+            scan_id: row['scan_id'] as int,
+            amount: row['amount'] as double,
+            is_in_contacts: row['is_in_contacts'] as int,
+            qr_type: row['qr_type'] as int,
+            hour_of_day: row['hour_of_day'] as int,
+            is_new_receiver: row['is_new_receiver'] as int,
+            scan_frequency: row['scan_frequency'] as int,
+            label: row['label'] as int?),
+        arguments: [scanId]);
+  }
+
+  @override
+  Future<int?> getFeatureCount() async {
+    return _queryAdapter.query('SELECT COUNT(*) FROM ml_features',
+        mapper: (Map<String, Object?> row) => row.values.first as int);
+  }
+
+  @override
+  Future<int?> getCountByUpiId(String upiId) async {
+    return _queryAdapter.query(
+        'SELECT COUNT(*) FROM ml_features JOIN scanned_qr ON ml_features.scan_id = scanned_qr.id WHERE scanned_qr.upi_id = ?1',
+        mapper: (Map<String, Object?> row) => row.values.first as int,
+        arguments: [upiId]);
+  }
+
+  @override
+  Future<int?> getRecentScanCount(int timestamp) async {
+    return _queryAdapter.query(
+        'SELECT COUNT(*) FROM ml_features JOIN scanned_qr ON ml_features.scan_id = scanned_qr.id WHERE scanned_qr.scan_time > ?1',
+        mapper: (Map<String, Object?> row) => row.values.first as int,
+        arguments: [timestamp]);
+  }
+
+  @override
+  Future<void> insertMlFeature(MlFeature feature) async {
+    await _mlFeatureInsertionAdapter.insert(feature, OnConflictStrategy.abort);
   }
 }

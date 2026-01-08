@@ -23,6 +23,9 @@ class ScannedQr {
   @ColumnInfo(name: 'risk_result')
   final String riskResult;
 
+  @ColumnInfo(name: 'is_in_contacts')
+  final bool isInContacts;
+
   ScannedQr({
     this.id,
     required this.upiId,
@@ -31,5 +34,6 @@ class ScannedQr {
     required this.scanTime,
     this.amount = 0.0,
     required this.riskResult,
+    this.isInContacts = false,
   });
 }

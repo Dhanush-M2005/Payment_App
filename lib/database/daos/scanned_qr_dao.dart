@@ -15,7 +15,7 @@ abstract class ScannedQrDao {
   Future<void> deleteScansForUpi(String upiId);
 
   @insert
-  Future<void> insertScan(ScannedQr scan);
+  Future<int> insertScan(ScannedQr scan);
 
   @Query(
     'SELECT * FROM scanned_qr GROUP BY upi_id ORDER BY scan_time DESC LIMIT 10',
