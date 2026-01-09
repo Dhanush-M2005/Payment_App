@@ -61,12 +61,12 @@ class _AmountScreenState extends State<AmountScreen> {
           _matchedContact = contact;
         });
       }
+    } else {
+      // Show popup for verification ONLY for non-number (alphabet) UPI IDs
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showKnowledgePopup();
+      });
     }
-
-    // Always show popup for verification as requested
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showKnowledgePopup();
-    });
   }
 
   void _showKnowledgePopup() {

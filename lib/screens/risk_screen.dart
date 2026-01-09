@@ -22,7 +22,6 @@ class _RiskScreenState extends State<RiskScreen> {
   double _amount = 0;
   bool _isInContacts = false;
   int _isNewReceiver = 1;
-  int _scanFrequency = 1;
 
   @override
   void initState() {
@@ -45,21 +44,11 @@ class _RiskScreenState extends State<RiskScreen> {
       final db = Provider.of<AppDatabase>(context, listen: false);
       final mlService = MlService(db);
 
-      // 2. Extract Features & Predict
-      // We do history lookup first to see if it's new
       final history = await db.scannedQrDao.getScansByUpi(upiId);
       final isNewReceiver = (history.isEmpty) ? 1 : 0;
 
       // Get current hour
       final hourOfDay = DateTime.now().hour;
-
-      // Get scan frequency (last 24h)
-      final oneDayAgo = DateTime.now()
-          .subtract(const Duration(hours: 24))
-          .millisecondsSinceEpoch;
-      final recentCount =
-          await db.mlFeatureDao.getRecentScanCount(oneDayAgo) ?? 0;
-      final scanFrequency = recentCount + 1;
 
       // Update state for UI visibility
       if (mounted) {
@@ -67,7 +56,6 @@ class _RiskScreenState extends State<RiskScreen> {
           _amount = amount;
           _isInContacts = isInContacts;
           _isNewReceiver = isNewReceiver;
-          _scanFrequency = scanFrequency;
         });
       }
 
@@ -78,13 +66,26 @@ class _RiskScreenState extends State<RiskScreen> {
         scan_id: 0, // Placeholder
         amount: amount,
         is_in_contacts: isInContacts ? 1 : 0,
-        qr_type: (qrType.toUpperCase().contains('MERCHANT')) ? 1 : 0,
         hour_of_day: hourOfDay,
         is_new_receiver: isNewReceiver,
-        scan_frequency: scanFrequency,
+      );
+
+      print("--------------------------------------------------");
+      print("ML INFERENCE FLOW STARTED");
+      print("PAYEE: $pn ($upiId)");
+      print(
+        "FEATURES: {Amt: $amount, Contact: ${isInContacts ? 1 : 0}, Hour: $hourOfDay, New: $isNewReceiver}",
       );
 
       final int prediction = await mlService.predict(mlFeature);
+
+      print("--------------------------------------------------");
+      print("ML INFERENCE RESULT");
+      print(
+        "STATUS: ${prediction == 1 ? '⚠️ FRAUD RISK DETECTED' : '✅ SAFE TRANSACTION'}",
+      );
+      print("VALUE: $prediction");
+      print("--------------------------------------------------");
 
       if (!mounted) return;
 
@@ -113,17 +114,11 @@ class _RiskScreenState extends State<RiskScreen> {
         scan_id: scanId,
         amount: amount,
         is_in_contacts: mlFeature.is_in_contacts,
-        qr_type: mlFeature.qr_type,
         hour_of_day: hourOfDay,
         is_new_receiver: isNewReceiver,
-        scan_frequency: scanFrequency,
         label: prediction,
       );
       await db.mlFeatureDao.insertMlFeature(finalFeature);
-
-      debugPrint(
-        "ML Prediction: ${prediction == 1 ? 'FRAUD' : 'SAFE'} (Result: $prediction)",
-      );
     } catch (e) {
       debugPrint("ML Error: $e");
     }
@@ -213,7 +208,7 @@ class _RiskScreenState extends State<RiskScreen> {
                 ),
                 child: Column(
                   children: [
-                    _buildFeatureRow("Model Type", "ONNX Cold Start V1"),
+                    _buildFeatureRow("Model Type", "Random Forest V1"),
                     const Divider(),
                     _buildFeatureRow(
                       "Amount Analyzed",
@@ -228,11 +223,6 @@ class _RiskScreenState extends State<RiskScreen> {
                     _buildFeatureRow(
                       "New Receiver?",
                       _isNewReceiver == 1 ? "Yes (1)" : "No (0)",
-                    ),
-                    const Divider(),
-                    _buildFeatureRow(
-                      "Recent Frequency",
-                      "$_scanFrequency scans",
                     ),
                   ],
                 ),

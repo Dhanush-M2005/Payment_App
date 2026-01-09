@@ -90,7 +90,7 @@ class _$AppDatabase extends AppDatabase {
     Callback? callback,
   ]) async {
     final databaseOptions = sqflite.OpenDatabaseOptions(
-      version: 4,
+      version: 5,
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
         await callback?.onConfigure?.call(database);
@@ -116,7 +116,7 @@ class _$AppDatabase extends AppDatabase {
         await database.execute(
             'CREATE TABLE IF NOT EXISTS `fraud_feedback` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `upi_hash` TEXT NOT NULL, `was_fraud` INTEGER NOT NULL, `user_action` TEXT NOT NULL, `reported_time` INTEGER NOT NULL)');
         await database.execute(
-            'CREATE TABLE IF NOT EXISTS `ml_features` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `scan_id` INTEGER NOT NULL, `amount` REAL NOT NULL, `is_in_contacts` INTEGER NOT NULL, `qr_type` INTEGER NOT NULL, `hour_of_day` INTEGER NOT NULL, `is_new_receiver` INTEGER NOT NULL, `scan_frequency` INTEGER NOT NULL, `label` INTEGER, FOREIGN KEY (`scan_id`) REFERENCES `scanned_qr` (`id`) ON UPDATE NO ACTION ON DELETE CASCADE)');
+            'CREATE TABLE IF NOT EXISTS `ml_features` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `scan_id` INTEGER NOT NULL, `amount` REAL NOT NULL, `is_in_contacts` INTEGER NOT NULL, `hour_of_day` INTEGER NOT NULL, `is_new_receiver` INTEGER NOT NULL, `label` INTEGER, FOREIGN KEY (`scan_id`) REFERENCES `scanned_qr` (`id`) ON UPDATE NO ACTION ON DELETE CASCADE)');
 
         await callback?.onCreate?.call(database, version);
       },
@@ -176,6 +176,20 @@ class _$ScannedQrDao extends ScannedQrDao {
                   'amount': item.amount,
                   'risk_result': item.riskResult,
                   'is_in_contacts': item.isInContacts ? 1 : 0
+                }),
+        _scannedQrDeletionAdapter = DeletionAdapter(
+            database,
+            'scanned_qr',
+            ['id'],
+            (ScannedQr item) => <String, Object?>{
+                  'id': item.id,
+                  'upi_id': item.upiId,
+                  'payee_name': item.payeeName,
+                  'qr_type': item.qrType,
+                  'scan_time': item.scanTime,
+                  'amount': item.amount,
+                  'risk_result': item.riskResult,
+                  'is_in_contacts': item.isInContacts ? 1 : 0
                 });
 
   final sqflite.DatabaseExecutor database;
@@ -185,6 +199,8 @@ class _$ScannedQrDao extends ScannedQrDao {
   final QueryAdapter _queryAdapter;
 
   final InsertionAdapter<ScannedQr> _scannedQrInsertionAdapter;
+
+  final DeletionAdapter<ScannedQr> _scannedQrDeletionAdapter;
 
   @override
   Future<List<ScannedQr>> getAllScans() async {
@@ -243,6 +259,16 @@ class _$ScannedQrDao extends ScannedQrDao {
   Future<int> insertScan(ScannedQr scan) {
     return _scannedQrInsertionAdapter.insertAndReturnId(
         scan, OnConflictStrategy.abort);
+  }
+
+  @override
+  Future<void> deleteScan(ScannedQr scan) async {
+    await _scannedQrDeletionAdapter.delete(scan);
+  }
+
+  @override
+  Future<void> deleteScans(List<ScannedQr> scans) async {
+    await _scannedQrDeletionAdapter.deleteList(scans);
   }
 }
 
@@ -438,10 +464,8 @@ class _$MlFeatureDao extends MlFeatureDao {
                   'scan_id': item.scan_id,
                   'amount': item.amount,
                   'is_in_contacts': item.is_in_contacts,
-                  'qr_type': item.qr_type,
                   'hour_of_day': item.hour_of_day,
                   'is_new_receiver': item.is_new_receiver,
-                  'scan_frequency': item.scan_frequency,
                   'label': item.label
                 });
 
@@ -461,10 +485,8 @@ class _$MlFeatureDao extends MlFeatureDao {
             scan_id: row['scan_id'] as int,
             amount: row['amount'] as double,
             is_in_contacts: row['is_in_contacts'] as int,
-            qr_type: row['qr_type'] as int,
             hour_of_day: row['hour_of_day'] as int,
             is_new_receiver: row['is_new_receiver'] as int,
-            scan_frequency: row['scan_frequency'] as int,
             label: row['label'] as int?));
   }
 
@@ -476,10 +498,8 @@ class _$MlFeatureDao extends MlFeatureDao {
             scan_id: row['scan_id'] as int,
             amount: row['amount'] as double,
             is_in_contacts: row['is_in_contacts'] as int,
-            qr_type: row['qr_type'] as int,
             hour_of_day: row['hour_of_day'] as int,
             is_new_receiver: row['is_new_receiver'] as int,
-            scan_frequency: row['scan_frequency'] as int,
             label: row['label'] as int?),
         arguments: [scanId]);
   }

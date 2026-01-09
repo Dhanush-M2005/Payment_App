@@ -21,4 +21,10 @@ abstract class ScannedQrDao {
     'SELECT * FROM scanned_qr GROUP BY upi_id ORDER BY scan_time DESC LIMIT 10',
   )
   Future<List<ScannedQr>> getRecentPayees();
+
+  @delete
+  Future<void> deleteScan(ScannedQr scan);
+
+  @delete
+  Future<void> deleteScans(List<ScannedQr> scans);
 }

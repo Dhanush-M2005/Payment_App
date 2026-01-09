@@ -11,48 +11,34 @@ class MlService {
 
   /// Extracts ML features for a transaction.
   /// This should be called after the ScannedQr record is inserted to ensure
-  /// frequencies and "is_new_receiver" are calculated correctly.
+  /// "is_new_receiver" is calculated correctly.
   Future<MlFeature> extractFeatures({
     required int scanId,
     required String upiId,
     required double amount,
     required bool isInContacts,
-    required String qrType,
   }) async {
     final now = DateTime.now();
 
     // 1. hour_of_day (0-23)
     int hourOfDay = now.hour;
 
-    // 2. qr_type (encoded as 0=P2P, 1=MERCHANT)
-    int qrTypeEncoded = (qrType.toUpperCase().contains('MERCHANT')) ? 1 : 0;
-
-    // 3. is_new_receiver
+    // 2. is_new_receiver
     // Check history for this UPI ID. If count is 1, it's the first time (including current).
     final history = await db.scannedQrDao.getScansByUpi(upiId);
     int isNewReceiver = (history.length <= 1) ? 1 : 0;
-
-    // 4. scan_frequency (Total scans in last 24 hours)
-    final oneDayAgo = now
-        .subtract(const Duration(hours: 24))
-        .millisecondsSinceEpoch;
-    final recentCount =
-        await db.mlFeatureDao.getRecentScanCount(oneDayAgo) ?? 0;
-    int scanFrequency = recentCount + 1; // +1 for the current transaction
 
     return MlFeature(
       scan_id: scanId,
       amount: amount,
       is_in_contacts: isInContacts ? 1 : 0,
-      qr_type: qrTypeEncoded,
       hour_of_day: hourOfDay,
       is_new_receiver: isNewReceiver,
-      scan_frequency: scanFrequency,
       // label: null, // To be filled later if fraud is detected
     );
   }
 
-  /// The ONNX session for the cold start model
+  /// The ONNX session for the random forest model
   OrtSession? _session;
 
   Future<void> _initSession() async {
@@ -63,7 +49,9 @@ class MlService {
     final sessionOptions = OrtSessionOptions();
 
     try {
-      final rawModel = await rootBundle.load('assets/ml/cold_start_model.onnx');
+      final rawModel = await rootBundle.load(
+        'assets/ml/random_forest_model.onnx',
+      );
       _session = OrtSession.fromBuffer(
         rawModel.buffer.asUint8List(),
         sessionOptions,
@@ -81,7 +69,12 @@ class MlService {
 
     try {
       final inputData = feature.toFeatureList();
-      final shape = [1, 6];
+      final shape = [1, 4];
+
+      print("--- ONNX Inference Input ---");
+      print("Features: $inputData");
+      print("Shape: $shape");
+
       // Use the proper factory method for the tensor
       final inputOrtValue = OrtValueTensor.createTensorWithDataList(
         inputData,
@@ -108,15 +101,33 @@ class MlService {
         }
 
         if (resultValue is List<int>) {
-          return resultValue.first;
+          final res = resultValue.first;
+          print(
+            "ONNX Model Prediction: ${res == 1 ? 'FRAUD (1)' : 'SAFE (0)'}",
+          );
+          return res;
         } else if (resultValue is List<double>) {
-          // If it's a probability, assume > 0.5 is fraud
-          return resultValue.first > 0.5 ? 1 : 0;
+          final res = resultValue.first;
+          print("ONNX Model Prediction (Probability): $res");
+          return res > 0.5 ? 1 : 0;
         } else if (resultValue is Int64List) {
-          return resultValue.first.toInt();
+          final res = resultValue.first.toInt();
+          print(
+            "ONNX Model Prediction: ${res == 1 ? 'FRAUD (1)' : 'SAFE (0)'}",
+          );
+          return res;
         } else if (resultValue is Float32List) {
-          // Some models output probabilities as Float32List
-          return resultValue.first > 0.5 ? 1 : 0;
+          final res = resultValue.first;
+          print("ONNX Model Prediction (Float32): $res");
+          return res > 0.5 ? 1 : 0;
+        } else {
+          print(
+            "ONNX Model Prediction (Unknown Type: ${resultValue.runtimeType}): $resultValue",
+          );
+          // Fallback check: if it's some other list type, try to get the first element
+          if (resultValue is List && resultValue.isNotEmpty) {
+            return resultValue.first == 1 ? 1 : 0;
+          }
         }
       }
     } catch (e) {

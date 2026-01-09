@@ -19,7 +19,7 @@ import 'daos/ml_feature_dao.dart';
 part 'app_database.g.dart';
 
 @Database(
-  version: 4,
+  version: 5,
   entities: [
     ScannedQr,
     FraudReference,

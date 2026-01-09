@@ -74,7 +74,7 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/ml/cold_start_model.onnx
+    - assets/ml/random_forest_model.onnx
 
   # To add assets to your application, add an assets section, like this:
   # assets:
