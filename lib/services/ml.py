@@ -10,13 +10,11 @@ from skl2onnx import convert_sklearn
 from skl2onnx.common.data_types import FloatTensorType
 import onnx
 
-# ==========================================
-# 1. Data Generation (Using your logic)
-# ==========================================
+
 def generate_data(n_samples=5000):
     np.random.seed(42)
     
-    # Base Features
+    
     amounts = np.random.exponential(scale=4000, size=n_samples)
     amounts = np.clip(amounts, 10, 10000).round(2)
     is_in_contacts = np.random.choice([0, 1], size=n_samples, p=[0.6, 0.4])
@@ -90,7 +88,7 @@ print("-" * 30)
 # Make predictions on the test set
 y_pred = rf_model.predict(X_test)
 
-# Calculate metrics
+
 accuracy = accuracy_score(y_test, y_pred)
 conf_matrix = confusion_matrix(y_test, y_pred)
 report = classification_report(y_test, y_pred)
@@ -101,10 +99,7 @@ print(conf_matrix)
 print("\nClassification Report:")
 print(report)
 
-# ==========================================
-# 5. Feature Importance Visualization
-# ==========================================
-# This shows which factors drove the Fraud decision
+
 feature_importances = pd.Series(rf_model.feature_importances_, index=X.columns).sort_values(ascending=False)
 
 plt.figure(figsize=(8, 5))
@@ -116,10 +111,7 @@ plt.ylabel("Features")
 plt.savefig("feature_importance.png")
 print("Feature importance plot saved as 'feature_importance.png'")
 
-# ==========================================
-# 6. Test a Specific Transaction
-# ==========================================
-# Example: High Amount, Not in Contacts, 2 AM (Should be Fraud/1)
+
 new_transaction = pd.DataFrame({
     'amount': [9500.00],
     'is_in_contacts': [0],
@@ -135,16 +127,14 @@ print(f"Transaction: ₹{new_transaction['amount'][0]}, Contact: {new_transactio
 print(f"Prediction: {'Fraud (1)' if prediction[0] == 1 else 'Safe (0)'}")
 print(f"Probability of Fraud: {probability[0][1]:.2%}")
 
-# ==========================================
-# 7. Export Model to ONNX
-# ==========================================
+
+
 # Define the input type for ONNX (4 features: amount, is_in_contacts, hour_of_day, is_new_receiver)
 initial_type = [('float_input', FloatTensorType([None, 4]))]
-# target_opset=15 ensures compatibility with ONNX Runtime versions that support up to IR 9
+target_opset=15 ensures compatibility with ONNX Runtime versions that support up to IR 9
 onx = convert_sklearn(rf_model, initial_types=initial_type, target_opset=15)
 
-# Define the path to save the ONNX model
-# ml.py is in lib/services/, so we go up two levels to reach the project root
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, "../../"))
 assets_ml_path = os.path.join(project_root, "assets", "ml")
@@ -155,8 +145,7 @@ if not os.path.exists(assets_ml_path):
 onnx_filename = "random_forest_model.onnx"
 onnx_path = os.path.join(assets_ml_path, onnx_filename)
 
-# Save the ONNX model
-with open(onnx_path, "wb") as f:
+
     f.write(onx.SerializeToString())
 
 print(f"\nONNX model exported successfully to: {onnx_path}")
