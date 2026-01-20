@@ -23,6 +23,8 @@ class _RiskScreenState extends State<RiskScreen> {
   bool _isInContacts = false;
   int _isNewReceiver = 1;
 
+  int? _scanId;
+
   @override
   void initState() {
     super.initState();
@@ -109,6 +111,7 @@ class _RiskScreenState extends State<RiskScreen> {
       );
 
       final int scanId = await db.scannedQrDao.insertScan(scan);
+      _scanId = scanId; // Store scanId in state
 
       final finalFeature = MlFeature(
         scan_id: scanId,
@@ -132,7 +135,7 @@ class _RiskScreenState extends State<RiskScreen> {
       Navigator.pushReplacementNamed(
         context,
         '/warning',
-        arguments: {...args, 'riskScore': 90},
+        arguments: {...args, 'riskScore': 90, 'scanId': _scanId},
       );
     }
   }

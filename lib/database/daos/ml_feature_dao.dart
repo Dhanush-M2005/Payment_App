@@ -24,4 +24,20 @@ abstract class MlFeatureDao {
     'SELECT COUNT(*) FROM ml_features JOIN scanned_qr ON ml_features.scan_id = scanned_qr.id WHERE scanned_qr.scan_time > :timestamp',
   )
   Future<int?> getRecentScanCount(int timestamp);
+
+  // --- ADAPTIVE LEARNING QUERIES ---
+
+  @Query('SELECT COUNT(*) FROM ml_features WHERE amount >= 10000 AND label = 0')
+  Future<int?> getSafeHighValueCount();
+
+  @Query('SELECT COUNT(*) FROM ml_features WHERE is_new_receiver = 1')
+  Future<int?> getTotalNewReceiverCount();
+
+  @Query(
+    'SELECT COUNT(*) FROM ml_features WHERE is_new_receiver = 1 AND label = 0',
+  )
+  Future<int?> getSafeNewReceiverCount();
+
+  @Query('UPDATE ml_features SET label = :label WHERE scan_id = :scanId')
+  Future<void> updateLabel(int scanId, int label);
 }

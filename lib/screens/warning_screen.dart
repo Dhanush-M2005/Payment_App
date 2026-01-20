@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:provider/provider.dart';
+import '../database/app_database.dart';
+import '../services/ml_service.dart';
 
 class WarningScreen extends StatelessWidget {
   const WarningScreen({super.key});
@@ -8,7 +11,7 @@ class WarningScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final args = ModalRoute.of(context)!.settings.arguments as Map;
     final int riskScore = args['riskScore'] ?? 0;
-    
+
     return Scaffold(
       backgroundColor: Colors.red.shade50,
       body: Padding(
@@ -16,16 +19,20 @@ class WarningScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.warning_amber_rounded, size: 80, color: Colors.orange)
+            const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 80,
+                  color: Colors.orange,
+                )
                 .animate(onPlay: (c) => c.repeat(reverse: true))
                 .scale(begin: const Offset(1, 1), end: const Offset(1.1, 1.1)),
             const SizedBox(height: 20),
             Text(
               "High Risk Transaction",
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red.shade900,
-                  ),
+                fontWeight: FontWeight.bold,
+                color: Colors.red.shade900,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 10),
@@ -39,13 +46,18 @@ class WarningScreen extends StatelessWidget {
             ),
             const SizedBox(height: 30),
             Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
               child: Padding(
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("Why was this flagged?", style: TextStyle(fontWeight: FontWeight.bold)),
+                    const Text(
+                      "Why was this flagged?",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 10),
                     _buildReasonRow("High transaction amount"),
                     _buildReasonRow("Unverified recipient"),
@@ -73,12 +85,25 @@ class WarningScreen extends StatelessWidget {
                 const SizedBox(width: 20),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pushReplacementNamed(
-                        context, 
-                        '/redirect', 
-                        arguments: args,
-                      );
+                    onPressed: () async {
+                      // Override the risk if user proceeds
+                      final int? scanId = args['scanId'];
+                      if (scanId != null) {
+                        final db = Provider.of<AppDatabase>(
+                          context,
+                          listen: false,
+                        );
+                        final mlService = MlService(db);
+                        await mlService.markSafe(scanId);
+                      }
+
+                      if (context.mounted) {
+                        Navigator.pushReplacementNamed(
+                          context,
+                          '/redirect',
+                          arguments: args,
+                        );
+                      }
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,

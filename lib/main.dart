@@ -7,7 +7,7 @@ import 'screens/risk_screen.dart';
 import 'screens/warning_screen.dart';
 import 'screens/redirect_screen.dart';
 import 'package:provider/provider.dart';
-import 'database/app_database.dart';
+import 'package:upi_shield/database/app_database.dart';
 import 'screens/transaction_history_screen.dart';
 import 'screens/pay_anyone_screen.dart';
 

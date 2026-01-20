@@ -27,4 +27,7 @@ abstract class ScannedQrDao {
 
   @delete
   Future<void> deleteScans(List<ScannedQr> scans);
+
+  @Query("UPDATE scanned_qr SET risk_result = 'SAFE' WHERE id = :id")
+  Future<void> markAsSafe(int id);
 }

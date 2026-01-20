@@ -256,6 +256,13 @@ class _$ScannedQrDao extends ScannedQrDao {
   }
 
   @override
+  Future<void> markAsSafe(int id) async {
+    await _queryAdapter.queryNoReturn(
+        'UPDATE scanned_qr SET risk_result = \'SAFE\' WHERE id = ?1',
+        arguments: [id]);
+  }
+
+  @override
   Future<int> insertScan(ScannedQr scan) {
     return _scannedQrInsertionAdapter.insertAndReturnId(
         scan, OnConflictStrategy.abort);
@@ -524,6 +531,37 @@ class _$MlFeatureDao extends MlFeatureDao {
         'SELECT COUNT(*) FROM ml_features JOIN scanned_qr ON ml_features.scan_id = scanned_qr.id WHERE scanned_qr.scan_time > ?1',
         mapper: (Map<String, Object?> row) => row.values.first as int,
         arguments: [timestamp]);
+  }
+
+  @override
+  Future<int?> getSafeHighValueCount() async {
+    return _queryAdapter.query(
+        'SELECT COUNT(*) FROM ml_features WHERE amount >= 10000 AND label = 0',
+        mapper: (Map<String, Object?> row) => row.values.first as int);
+  }
+
+  @override
+  Future<int?> getTotalNewReceiverCount() async {
+    return _queryAdapter.query(
+        'SELECT COUNT(*) FROM ml_features WHERE is_new_receiver = 1',
+        mapper: (Map<String, Object?> row) => row.values.first as int);
+  }
+
+  @override
+  Future<int?> getSafeNewReceiverCount() async {
+    return _queryAdapter.query(
+        'SELECT COUNT(*) FROM ml_features WHERE is_new_receiver = 1 AND label = 0',
+        mapper: (Map<String, Object?> row) => row.values.first as int);
+  }
+
+  @override
+  Future<void> updateLabel(
+    int scanId,
+    int label,
+  ) async {
+    await _queryAdapter.queryNoReturn(
+        'UPDATE ml_features SET label = ?2 WHERE scan_id = ?1',
+        arguments: [scanId, label]);
   }
 
   @override

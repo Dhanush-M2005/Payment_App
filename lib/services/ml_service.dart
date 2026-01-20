@@ -100,40 +100,96 @@ class MlService {
           element?.release();
         }
 
+        int basePrediction = 0;
+        double baseProb = 0.0;
+
         if (resultValue is List<int>) {
-          final res = resultValue.first;
-          print(
-            "ONNX Model Prediction: ${res == 1 ? 'FRAUD (1)' : 'SAFE (0)'}",
-          );
-          return res;
+          basePrediction = resultValue.first;
+          baseProb = basePrediction == 1 ? 0.8 : 0.2;
         } else if (resultValue is List<double>) {
-          final res = resultValue.first;
-          print("ONNX Model Prediction (Probability): $res");
-          return res > 0.5 ? 1 : 0;
+          baseProb = resultValue.first; // Assuming prob of class 1
+          basePrediction = baseProb > 0.5 ? 1 : 0;
         } else if (resultValue is Int64List) {
-          final res = resultValue.first.toInt();
-          print(
-            "ONNX Model Prediction: ${res == 1 ? 'FRAUD (1)' : 'SAFE (0)'}",
-          );
-          return res;
+          basePrediction = resultValue.first.toInt();
+          baseProb = basePrediction == 1 ? 0.8 : 0.2;
         } else if (resultValue is Float32List) {
           final res = resultValue.first;
-          print("ONNX Model Prediction (Float32): $res");
-          return res > 0.5 ? 1 : 0;
+          // In some sklearn exports, output can be [prob_0, prob_1] or just prob_1
+          // Here assuming single value float
+          baseProb = res;
+          basePrediction = res > 0.5 ? 1 : 0;
         } else {
-          print(
-            "ONNX Model Prediction (Unknown Type: ${resultValue.runtimeType}): $resultValue",
-          );
-          // Fallback check: if it's some other list type, try to get the first element
+          // Fallback
           if (resultValue is List && resultValue.isNotEmpty) {
-            return resultValue.first == 1 ? 1 : 0;
+            basePrediction = resultValue.first == 1 ? 1 : 0;
+            baseProb = basePrediction == 1 ? 0.8 : 0.2;
           }
         }
+
+        print("ONNX Base Prediction: $basePrediction (Prob: $baseProb)");
+
+        // --- ADAPTIVE LOGIC (SELF-TRAINING) ---
+        if (basePrediction == 1) {
+          final modelType = await getModelType();
+          if (modelType == "PERSONALIZED") {
+            print("[Adaptive] Analyzing user history for personalisation...");
+            double adjustedProb = baseProb;
+
+            // 1. High Value Comfort Analysis
+            if (feature.amount > 10000) {
+              final safeHighValueCount =
+                  await db.mlFeatureDao.getSafeHighValueCount() ?? 0;
+              // Rule: Has done it safely >= 3 times
+              if (safeHighValueCount >= 3) {
+                print(
+                  " -> Pattern found: User makes safe high-value payments.",
+                );
+                adjustedProb -= 0.25;
+              }
+            }
+
+            // 2. New Receiver Comfort Analysis
+            if (feature.is_new_receiver == 1) {
+              final totalNew =
+                  await db.mlFeatureDao.getTotalNewReceiverCount() ?? 0;
+              if (totalNew > 0) {
+                final safeNew =
+                    await db.mlFeatureDao.getSafeNewReceiverCount() ?? 0;
+                final ratio = safeNew / totalNew;
+                // Rule: > 80% success rate with new people
+                if (ratio > 0.8) {
+                  print(" -> Pattern found: User trusts new receivers.");
+                  adjustedProb -= 0.20;
+                }
+              }
+            }
+
+            print(
+              "[Adaptive] Base Risk: $baseProb | Adjusted Risk: $adjustedProb",
+            );
+
+            if (adjustedProb < 0.5) {
+              print(
+                "✅ ADAPTIVE OVERRIDE: Transaction Marked Safe based on History.",
+              );
+              return 0;
+            }
+          }
+        }
+
+        return basePrediction;
       }
     } catch (e) {
       print("Error during ONNX inference: $e");
     }
     return 0;
+  }
+
+  /// Manually marks a transaction as safe (Feedback Loop).
+  Future<void> markSafe(int scanId) async {
+    await db.mlFeatureDao.updateLabel(scanId, 0);
+    await db.scannedQrDao.markAsSafe(scanId);
+    print("Transaction $scanId marked as SAFE by user override.");
   }
 
   /// Helper to get the model type (Cold Start vs Personalized)
