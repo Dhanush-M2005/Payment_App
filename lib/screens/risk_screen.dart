@@ -65,29 +65,29 @@ class _RiskScreenState extends State<RiskScreen> {
       await Future.delayed(1500.ms);
 
       final mlFeature = MlFeature(
-        scan_id: 0, // Placeholder
+        scanId: 0, // Placeholder
         amount: amount,
-        is_in_contacts: isInContacts ? 1 : 0,
-        hour_of_day: hourOfDay,
-        is_new_receiver: isNewReceiver,
+        isInContacts: isInContacts ? 1 : 0,
+        hourOfDay: hourOfDay,
+        isNewReceiver: isNewReceiver,
       );
 
-      print("--------------------------------------------------");
-      print("ML INFERENCE FLOW STARTED");
-      print("PAYEE: $pn ($upiId)");
-      print(
+      debugPrint("--------------------------------------------------");
+      debugPrint("ML INFERENCE FLOW STARTED");
+      debugPrint("PAYEE: $pn ($upiId)");
+      debugPrint(
         "FEATURES: {Amt: $amount, Contact: ${isInContacts ? 1 : 0}, Hour: $hourOfDay, New: $isNewReceiver}",
       );
 
       final int prediction = await mlService.predict(mlFeature);
 
-      print("--------------------------------------------------");
-      print("ML INFERENCE RESULT");
-      print(
+      debugPrint("--------------------------------------------------");
+      debugPrint("ML INFERENCE RESULT");
+      debugPrint(
         "STATUS: ${prediction == 1 ? '⚠️ FRAUD RISK DETECTED' : '✅ SAFE TRANSACTION'}",
       );
-      print("VALUE: $prediction");
-      print("--------------------------------------------------");
+      debugPrint("VALUE: $prediction");
+      debugPrint("--------------------------------------------------");
 
       if (!mounted) return;
 
@@ -114,11 +114,11 @@ class _RiskScreenState extends State<RiskScreen> {
       _scanId = scanId; // Store scanId in state
 
       final finalFeature = MlFeature(
-        scan_id: scanId,
+        scanId: scanId,
         amount: amount,
-        is_in_contacts: mlFeature.is_in_contacts,
-        hour_of_day: hourOfDay,
-        is_new_receiver: isNewReceiver,
+        isInContacts: mlFeature.isInContacts,
+        hourOfDay: hourOfDay,
+        isNewReceiver: isNewReceiver,
         label: prediction,
       );
       await db.mlFeatureDao.insertMlFeature(finalFeature);

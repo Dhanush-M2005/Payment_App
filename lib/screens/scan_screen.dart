@@ -54,26 +54,48 @@ class _ScanScreenState extends State<ScanScreen> {
 
       try {
         final inputImage = _inputImageFromCameraImage(image);
-        if (inputImage == null) return;
+        if (inputImage == null) {
+          debugPrint("[DEBUG] inputImage is null, skipping frame");
+          return;
+        }
 
         final barcodes = await _barcodeScanner.processImage(inputImage);
+
+        // Debug: Print when barcodes are detected
+        if (barcodes.isNotEmpty) {
+          debugPrint("\n[DEBUG] ========================");
+          debugPrint("[DEBUG] DETECTED ${barcodes.length} BARCODE(S)!");
+          debugPrint("[DEBUG] ========================\n");
+        }
 
         for (final barcode in barcodes) {
           final rawValue = barcode.rawValue;
 
           if (rawValue != null) {
-            print("---------------------------------------------------------");
-            print("Detected QR Code: $rawValue");
-            print("---------------------------------------------------------");
+            // ========== RAW URL PRINT ==========
+            debugPrint("\n");
+            debugPrint(
+              "═══════════════════════════════════════════════════════════",
+            );
+            debugPrint(
+              "                    📱 QR CODE SCANNED                     ",
+            );
+            debugPrint(
+              "═══════════════════════════════════════════════════════════",
+            );
+            debugPrint("RAW URL: $rawValue");
+            debugPrint(
+              "═══════════════════════════════════════════════════════════",
+            );
+            debugPrint("\n");
 
-            // Allow any QR that contains 'pa=' (common for UPI) OR starts with upi://
             if (rawValue.toLowerCase().startsWith('upi://') ||
                 rawValue.contains('pa=')) {
-              print(
+              debugPrint(
                 "---------------------------------------------------------",
               );
-              print("Creating transaction for: $rawValue");
-              print(
+              debugPrint("Creating transaction for: $rawValue");
+              debugPrint(
                 "---------------------------------------------------------",
               );
               await _controller?.stopImageStream();
@@ -105,11 +127,35 @@ class _ScanScreenState extends State<ScanScreen> {
 
       for (final barcode in barcodes) {
         final rawValue = barcode.rawValue;
+
+        // ========== RAW URL PRINT (Gallery) ==========
+        if (rawValue != null) {
+          debugPrint("\n");
+          debugPrint(
+            "═══════════════════════════════════════════════════════════",
+          );
+          debugPrint(
+            "               📷 QR CODE FROM GALLERY                     ",
+          );
+          debugPrint(
+            "═══════════════════════════════════════════════════════════",
+          );
+          debugPrint("RAW URL: $rawValue");
+          debugPrint(
+            "═══════════════════════════════════════════════════════════",
+          );
+          debugPrint("\n");
+        }
+
         if (rawValue != null &&
             rawValue.toLowerCase().startsWith('upi://pay')) {
-          print("---------------------------------------------------------");
-          print("Creating transaction for: $rawValue");
-          print("---------------------------------------------------------");
+          debugPrint(
+            "---------------------------------------------------------",
+          );
+          debugPrint("Creating transaction for: $rawValue");
+          debugPrint(
+            "---------------------------------------------------------",
+          );
           await _controller?.stopImageStream();
           if (!mounted) return;
 
@@ -330,7 +376,7 @@ class ScannerOverlayPainter extends CustomPainter {
 
     final overlayPaint = Paint()
       ..color = Colors.black
-          .withOpacity(0.5) // Darkening
+          .withValues(alpha: 0.5) // Darkening
       ..style = PaintingStyle.fill;
 
     canvas.drawPath(overlayPath, overlayPaint);

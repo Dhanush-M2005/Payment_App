@@ -468,11 +468,11 @@ class _$MlFeatureDao extends MlFeatureDao {
             'ml_features',
             (MlFeature item) => <String, Object?>{
                   'id': item.id,
-                  'scan_id': item.scan_id,
+                  'scan_id': item.scanId,
                   'amount': item.amount,
-                  'is_in_contacts': item.is_in_contacts,
-                  'hour_of_day': item.hour_of_day,
-                  'is_new_receiver': item.is_new_receiver,
+                  'is_in_contacts': item.isInContacts,
+                  'hour_of_day': item.hourOfDay,
+                  'is_new_receiver': item.isNewReceiver,
                   'label': item.label
                 });
 
@@ -489,11 +489,11 @@ class _$MlFeatureDao extends MlFeatureDao {
     return _queryAdapter.queryList('SELECT * FROM ml_features ORDER BY id DESC',
         mapper: (Map<String, Object?> row) => MlFeature(
             id: row['id'] as int?,
-            scan_id: row['scan_id'] as int,
+            scanId: row['scan_id'] as int,
             amount: row['amount'] as double,
-            is_in_contacts: row['is_in_contacts'] as int,
-            hour_of_day: row['hour_of_day'] as int,
-            is_new_receiver: row['is_new_receiver'] as int,
+            isInContacts: row['is_in_contacts'] as int,
+            hourOfDay: row['hour_of_day'] as int,
+            isNewReceiver: row['is_new_receiver'] as int,
             label: row['label'] as int?));
   }
 
@@ -502,11 +502,11 @@ class _$MlFeatureDao extends MlFeatureDao {
     return _queryAdapter.query('SELECT * FROM ml_features WHERE scan_id = ?1',
         mapper: (Map<String, Object?> row) => MlFeature(
             id: row['id'] as int?,
-            scan_id: row['scan_id'] as int,
+            scanId: row['scan_id'] as int,
             amount: row['amount'] as double,
-            is_in_contacts: row['is_in_contacts'] as int,
-            hour_of_day: row['hour_of_day'] as int,
-            is_new_receiver: row['is_new_receiver'] as int,
+            isInContacts: row['is_in_contacts'] as int,
+            hourOfDay: row['hour_of_day'] as int,
+            isNewReceiver: row['is_new_receiver'] as int,
             label: row['label'] as int?),
         arguments: [scanId]);
   }

@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:onnxruntime/onnxruntime.dart';
 import '../database/app_database.dart';
@@ -29,11 +29,11 @@ class MlService {
     int isNewReceiver = (history.length <= 1) ? 1 : 0;
 
     return MlFeature(
-      scan_id: scanId,
+      scanId: scanId,
       amount: amount,
-      is_in_contacts: isInContacts ? 1 : 0,
-      hour_of_day: hourOfDay,
-      is_new_receiver: isNewReceiver,
+      isInContacts: isInContacts ? 1 : 0,
+      hourOfDay: hourOfDay,
+      isNewReceiver: isNewReceiver,
       // label: null, // To be filled later if fraud is detected
     );
   }
@@ -57,7 +57,7 @@ class MlService {
         sessionOptions,
       );
     } catch (e) {
-      print("Error loading ONNX model: $e");
+      debugPrint("Error loading ONNX model: $e");
     }
   }
 
@@ -71,9 +71,9 @@ class MlService {
       final inputData = feature.toFeatureList();
       final shape = [1, 4];
 
-      print("--- ONNX Inference Input ---");
-      print("Features: $inputData");
-      print("Shape: $shape");
+      debugPrint("--- ONNX Inference Input ---");
+      debugPrint("Features: $inputData");
+      debugPrint("Shape: $shape");
 
       // Use the proper factory method for the tensor
       final inputOrtValue = OrtValueTensor.createTensorWithDataList(
@@ -126,13 +126,15 @@ class MlService {
           }
         }
 
-        print("ONNX Base Prediction: $basePrediction (Prob: $baseProb)");
+        debugPrint("ONNX Base Prediction: $basePrediction (Prob: $baseProb)");
 
         // --- ADAPTIVE LOGIC (SELF-TRAINING) ---
         if (basePrediction == 1) {
           final modelType = await getModelType();
           if (modelType == "PERSONALIZED") {
-            print("[Adaptive] Analyzing user history for personalisation...");
+            debugPrint(
+              "[Adaptive] Analyzing user history for personalisation...",
+            );
             double adjustedProb = baseProb;
 
             // 1. High Value Comfort Analysis
@@ -141,7 +143,7 @@ class MlService {
                   await db.mlFeatureDao.getSafeHighValueCount() ?? 0;
               // Rule: Has done it safely >= 3 times
               if (safeHighValueCount >= 3) {
-                print(
+                debugPrint(
                   " -> Pattern found: User makes safe high-value payments.",
                 );
                 adjustedProb -= 0.25;
@@ -149,7 +151,7 @@ class MlService {
             }
 
             // 2. New Receiver Comfort Analysis
-            if (feature.is_new_receiver == 1) {
+            if (feature.isNewReceiver == 1) {
               final totalNew =
                   await db.mlFeatureDao.getTotalNewReceiverCount() ?? 0;
               if (totalNew > 0) {
@@ -158,18 +160,18 @@ class MlService {
                 final ratio = safeNew / totalNew;
                 // Rule: > 80% success rate with new people
                 if (ratio > 0.8) {
-                  print(" -> Pattern found: User trusts new receivers.");
+                  debugPrint(" -> Pattern found: User trusts new receivers.");
                   adjustedProb -= 0.20;
                 }
               }
             }
 
-            print(
+            debugPrint(
               "[Adaptive] Base Risk: $baseProb | Adjusted Risk: $adjustedProb",
             );
 
             if (adjustedProb < 0.5) {
-              print(
+              debugPrint(
                 "✅ ADAPTIVE OVERRIDE: Transaction Marked Safe based on History.",
               );
               return 0;
@@ -180,7 +182,7 @@ class MlService {
         return basePrediction;
       }
     } catch (e) {
-      print("Error during ONNX inference: $e");
+      debugPrint("Error during ONNX inference: $e");
     }
     return 0;
   }
@@ -189,7 +191,7 @@ class MlService {
   Future<void> markSafe(int scanId) async {
     await db.mlFeatureDao.updateLabel(scanId, 0);
     await db.scannedQrDao.markAsSafe(scanId);
-    print("Transaction $scanId marked as SAFE by user override.");
+    debugPrint("Transaction $scanId marked as SAFE by user override.");
   }
 
   /// Helper to get the model type (Cold Start vs Personalized)

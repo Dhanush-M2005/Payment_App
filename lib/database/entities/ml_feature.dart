@@ -18,31 +18,31 @@ class MlFeature {
   final int? id;
 
   @ColumnInfo(name: 'scan_id')
-  final int scan_id;
+  final int scanId;
 
   // ML Features in the requested order
   @ColumnInfo(name: 'amount')
   final double amount;
 
   @ColumnInfo(name: 'is_in_contacts')
-  final int is_in_contacts; // 0 or 1
+  final int isInContacts; // 0 or 1
 
   @ColumnInfo(name: 'hour_of_day')
-  final int hour_of_day; // 0-23
+  final int hourOfDay; // 0-23
 
   @ColumnInfo(name: 'is_new_receiver')
-  final int is_new_receiver; // 0 or 1
+  final int isNewReceiver; // 0 or 1
 
   @ColumnInfo(name: 'label')
   final int? label; // Nullable until confirmed fraud or safe
 
   MlFeature({
     this.id,
-    required this.scan_id,
+    required this.scanId,
     required this.amount,
-    required this.is_in_contacts,
-    required this.hour_of_day,
-    required this.is_new_receiver,
+    required this.isInContacts,
+    required this.hourOfDay,
+    required this.isNewReceiver,
     this.label,
   });
 
@@ -50,9 +50,9 @@ class MlFeature {
   Float32List toFeatureList() {
     return Float32List.fromList([
       amount,
-      is_in_contacts.toDouble(),
-      hour_of_day.toDouble(),
-      is_new_receiver.toDouble(),
+      isInContacts.toDouble(),
+      hourOfDay.toDouble(),
+      isNewReceiver.toDouble(),
     ]);
   }
 }

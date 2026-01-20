@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
-import 'package:permission_handler/permission_handler.dart';
 import '../database/app_database.dart';
 import '../database/entities/scanned_qr.dart';
 
@@ -16,7 +15,6 @@ class _PayAnyoneScreenState extends State<PayAnyoneScreen> {
   final TextEditingController _searchController = TextEditingController();
   List<Contact>? _contacts;
   bool _isLoadingContacts = true;
-  String? _phoneError;
 
   @override
   void initState() {
@@ -40,7 +38,6 @@ class _PayAnyoneScreenState extends State<PayAnyoneScreen> {
       if (mounted) {
         setState(() {
           _isLoadingContacts = false;
-          _phoneError = "Permission denied";
         });
       }
     }
@@ -264,8 +261,9 @@ class _PayAnyoneScreenState extends State<PayAnyoneScreen> {
                     itemBuilder: (context, index) {
                       final contact = _contacts![index];
                       // Only show contacts with phones
-                      if (contact.phones.isEmpty)
+                      if (contact.phones.isEmpty) {
                         return const SizedBox.shrink();
+                      }
 
                       final phone = contact.phones.first.number;
                       // In a real app we would check if this phone is registered on UPI.

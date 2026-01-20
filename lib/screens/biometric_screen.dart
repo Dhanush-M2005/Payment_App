@@ -26,10 +26,11 @@ class _BiometricScreenState extends State<BiometricScreen> {
       setState(() {
         _isAuthenticating = true;
       });
-      
+
       // Check if device supports biometrics
       final bool canAuthenticateWithBiometrics = await auth.canCheckBiometrics;
-      final bool canAuthenticate = canAuthenticateWithBiometrics || await auth.isDeviceSupported();
+      final bool canAuthenticate =
+          canAuthenticateWithBiometrics || await auth.isDeviceSupported();
 
       if (!canAuthenticate) {
         // Fallback for emulators or devices without biometrics
@@ -78,38 +79,45 @@ class _BiometricScreenState extends State<BiometricScreen> {
             Text(
               "Secure your payments",
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
             ).animate().fadeIn(delay: 300.ms).moveY(begin: 20, end: 0),
             const SizedBox(height: 50),
             InkWell(
-              onTap: _authenticate,
-              borderRadius: BorderRadius.circular(50),
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
-                  shape: BoxShape.circle,
+                  onTap: _authenticate,
+                  borderRadius: BorderRadius.circular(50),
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.fingerprint,
+                      size: 60,
+                      color: Colors.blue,
+                    ),
+                  ),
+                )
+                .animate(
+                  onPlay: (controller) => controller.repeat(reverse: true),
+                )
+                .scale(
+                  begin: const Offset(1, 1),
+                  end: const Offset(1.1, 1.1),
+                  duration: 1.seconds,
                 ),
-                child: const Icon(
-                  Icons.fingerprint,
-                  size: 60,
-                  color: Colors.blue,
-                ),
-              ),
-            ).animate(onPlay: (controller) => controller.repeat(reverse: true))
-              .scale(begin: const Offset(1, 1), end: const Offset(1.1, 1.1), duration: 1.seconds),
             const SizedBox(height: 20),
             TextButton(
               onPressed: _authenticate,
               child: const Text("Tap to authenticate"),
             ),
-             if (!_isAuthenticating)
+            if (!_isAuthenticating)
               Padding(
                 padding: const EdgeInsets.only(top: 20),
                 child: TextButton(
-                  onPressed: _navigateToHome, 
+                  onPressed: _navigateToHome,
                   child: const Text("(Mock) Skip Authentication"),
                 ),
               ),
