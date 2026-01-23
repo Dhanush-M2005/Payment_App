@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
-import 'screens/biometric_screen.dart';
+import 'screens/password_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/amount_screen.dart';
 import 'screens/risk_screen.dart';
@@ -34,7 +34,7 @@ class UpiShieldApp extends StatelessWidget {
       theme: AppTheme.lightTheme,
       initialRoute: '/',
       routes: {
-        '/': (context) => const BiometricScreen(),
+        '/': (context) => const PasswordScreen(),
         '/home': (context) => const HomeScreen(),
         '/amount': (context) => const AmountScreen(),
         '/risk': (context) => const RiskScreen(),

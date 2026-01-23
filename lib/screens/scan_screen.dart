@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:camera/camera.dart';
-
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -35,8 +34,8 @@ class _ScanScreenState extends State<ScanScreen> {
 
     _controller = CameraController(
       cameras.first,
-      ResolutionPreset.medium,
-      enableAudio: false,
+      ResolutionPreset.high,
+      enableAudio: false, 
       imageFormatGroup: Platform.isAndroid
           ? ImageFormatGroup.nv21
           : ImageFormatGroup.bgra8888,
@@ -91,19 +90,24 @@ class _ScanScreenState extends State<ScanScreen> {
 
             if (rawValue.toLowerCase().startsWith('upi://') ||
                 rawValue.contains('pa=')) {
+              final result = _classifyPayment(rawValue);
+
               debugPrint(
                 "---------------------------------------------------------",
               );
               debugPrint("Creating transaction for: $rawValue");
+              debugPrint(
+                "Classified as: ${result['isMerchant'] ? 'MERCHANT' : 'PERSONAL'}",
+              );
+              debugPrint("Type: ${result['merchantType']}");
+              debugPrint("Source: ${result['detectionSource']}");
               debugPrint(
                 "---------------------------------------------------------",
               );
               await _controller?.stopImageStream();
               if (!mounted) return;
 
-              Navigator.pop(context, {
-                'upiUri': rawValue, // ✅ FULL URI
-              });
+              Navigator.pop(context, result);
               return;
             }
           }
@@ -148,18 +152,24 @@ class _ScanScreenState extends State<ScanScreen> {
         }
 
         if (rawValue != null &&
-            rawValue.toLowerCase().startsWith('upi://pay')) {
+            (rawValue.toLowerCase().startsWith('upi://') ||
+                rawValue.contains('pa='))) {
+          final result = _classifyPayment(rawValue);
+
           debugPrint(
             "---------------------------------------------------------",
           );
           debugPrint("Creating transaction for: $rawValue");
+          debugPrint(
+            "Classified as: ${result['isMerchant'] ? 'MERCHANT' : 'PERSONAL'}",
+          );
           debugPrint(
             "---------------------------------------------------------",
           );
           await _controller?.stopImageStream();
           if (!mounted) return;
 
-          Navigator.pop(context, {'upiUri': rawValue});
+          Navigator.pop(context, result);
           return;
         }
       }
@@ -175,6 +185,83 @@ class _ScanScreenState extends State<ScanScreen> {
           context,
         ).showSnackBar(SnackBar(content: Text("Error scanning image: $e")));
       }
+    }
+  }
+
+  Map<String, dynamic> _classifyPayment(String rawValue) {
+    Uri? uri = Uri.tryParse(rawValue);
+    // Robust parsing fallback
+    if (uri == null || !uri.hasQuery) {
+      uri = Uri.tryParse(rawValue.replaceFirst("upi://", "https://"));
+    }
+
+    final params = uri?.queryParameters ?? {};
+    final mc = params['mc'];
+    final mode = params['mode'];
+    final pa = params['pa'];
+
+    bool isMerchant = false;
+    String? merchantType;
+    String? detectionSource;
+
+    // CONDITION 1 (NPCI Standard – Highest Priority)
+    if (mc != null && mc.isNotEmpty) {
+      isMerchant = true;
+      merchantType = _getCategoryFromMc(mc);
+      detectionSource = "NPCI_MCC";
+    }
+    // CONDITION 2 (PhonePe / Google Pay Merchant)
+    else if (mode == "02") {
+      isMerchant = true;
+      merchantType = "Grocery/Retail"; // Fallback constant
+      detectionSource = "UPI_MODE";
+    }
+    // CONDITION 3 (Paytm Merchant Specific Rule)
+    else if (pa != null && pa.endsWith("@ptys")) {
+      isMerchant = true;
+      merchantType = "PAYTM_MERCHANT";
+      detectionSource = "PAYTM_HANDLE";
+    }
+    // CONDITION 4 (Fallback)
+    else {
+      isMerchant = false; // PERSONAL
+      detectionSource = "FALLBACK_PERSONAL";
+    }
+
+    // "if mcc does not exist keep it as grocery/retail" - applies if identified as merchant but no type
+    if (isMerchant && merchantType == null) {
+      merchantType = "Grocery/Retail";
+    }
+
+    return {
+      'upiUri': rawValue,
+      'isMerchant': isMerchant,
+      'merchantType': merchantType,
+      'detectionSource': detectionSource,
+    };
+  }
+
+  String _getCategoryFromMc(String? mc) {
+    if (mc == null) return "Grocery/Retail";
+
+    switch (mc) {
+      case "8011":
+        return "Hospital";
+      case "5912":
+        return "Pharmacy";
+      case "5812":
+        return "Restaurant";
+      // 5411 is Retail Shop, user requested Grocery/Retail default, so mapping specific Retail Shop to it is fine or keeping logic
+      case "5411":
+        return "Grocery/Retail";
+      case "7011":
+        return "Hotel";
+      case "8249":
+        return "Education";
+      case "4111":
+        return "Transport";
+      default:
+        return "Grocery/Retail";
     }
   }
 

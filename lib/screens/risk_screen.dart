@@ -49,6 +49,24 @@ class _RiskScreenState extends State<RiskScreen> {
       final history = await db.scannedQrDao.getScansByUpi(upiId);
       final isNewReceiver = (history.isEmpty) ? 1 : 0;
 
+      // Heuristic: Check if transaction amount is within historical range
+      bool isAmountSafeBasedOnHistory = false;
+      double maxPastAmount = 0;
+      if (history.isNotEmpty) {
+        // Find the maximum amount previously sent to this receiver
+        for (var scan in history) {
+          if ((scan.amount ?? 0) > maxPastAmount) {
+            maxPastAmount = scan.amount ?? 0;
+          }
+        }
+
+        // If current amount is <= 1.5x the max past amount, we consider it "in range"
+        // This handles the case where the user sends 10000, and has sent 10000 before.
+        if (amount > 0 && amount <= (maxPastAmount * 1.5)) {
+          isAmountSafeBasedOnHistory = true;
+        }
+      }
+
       // Get current hour
       final hourOfDay = DateTime.now().hour;
 
@@ -79,10 +97,21 @@ class _RiskScreenState extends State<RiskScreen> {
         "FEATURES: {Amt: $amount, Contact: ${isInContacts ? 1 : 0}, Hour: $hourOfDay, New: $isNewReceiver}",
       );
 
-      final int prediction = await mlService.predict(mlFeature);
+      int prediction = await mlService.predict(mlFeature);
+
+      // Override Logic
+      if (isAmountSafeBasedOnHistory && prediction == 1) {
+        debugPrint("!!! HEURISTIC OVERRIDE !!!");
+        debugPrint("User has sent money to this receiver before.");
+        debugPrint("Current Amount: $amount. Max Past Amount: $maxPastAmount.");
+        debugPrint(
+          "Conclusion: Transaction is within historical range. Overriding Fraud Warning.",
+        );
+        prediction = 0; // Force SAFE
+      }
 
       debugPrint("--------------------------------------------------");
-      debugPrint("ML INFERENCE RESULT");
+      debugPrint("ML INFERENCE RESULT (Final)");
       debugPrint(
         "STATUS: ${prediction == 1 ? '⚠️ FRAUD RISK DETECTED' : '✅ SAFE TRANSACTION'}",
       );

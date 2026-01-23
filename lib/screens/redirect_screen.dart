@@ -20,10 +20,10 @@ class _RedirectScreenState extends State<RedirectScreen> {
   }
 
   Future<void> _redirect() async {
-    final args =
-        ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+    final args = ModalRoute.of(context)!.settings.arguments as Map;
 
-    final String upiUriString = args['upiUri'];
+    // Safely access keys treating the map as dynamic
+    final String upiUriString = args['upiUri']?.toString() ?? '';
     final Uri upiUri = Uri.parse(upiUriString);
 
     await Future.delayed(const Duration(seconds: 1));

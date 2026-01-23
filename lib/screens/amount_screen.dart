@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:provider/provider.dart';
 import '../services/contact_service.dart';
+import '../database/app_database.dart';
 
 class AmountScreen extends StatefulWidget {
   const AmountScreen({super.key});
@@ -25,6 +27,7 @@ class _AmountScreenState extends State<AmountScreen> {
   String? _merchantCategory;
 
   bool _userConfirmedKnowledge = false;
+  bool _showInlineVerification = false; // Controls the 2nd time "small buttons"
 
   @override
   void didChangeDependencies() {
@@ -35,54 +38,62 @@ class _AmountScreenState extends State<AmountScreen> {
     _upiUri = args?['upiUri'];
 
     if (_upiUri != null) {
-      // Fix malformed URIs (e.g. spaces in name) to ensure parsing succeeds
+      // Fix malformed URIs
       String cleanUri = _upiUri!;
       if (cleanUri.contains(" ") && !cleanUri.contains("%20")) {
         cleanUri = cleanUri.replaceAll(" ", "%20");
       }
-      _upiUri = cleanUri; // Update class member with cleaned URI
+      _upiUri = cleanUri;
 
       final uri = Uri.tryParse(cleanUri);
       if (uri != null) {
         _upiId = uri.queryParameters['pa'];
         _pn = uri.queryParameters['pn'];
 
-        // ---------------------------------------------------------
-        // MERCHANT DETECTION LOGIC
-        // ---------------------------------------------------------
-        // Check for multiple merchant indicators: mc, mid, tid
-        final String? mc = uri.queryParameters['mc'];
-        final String? mid = uri.queryParameters['mid']; // Merchant ID
-        final String? tid = uri.queryParameters['tid']; // Terminal ID
-
-        // If any of these exist, treat as Merchant
-        if ((mc != null && mc.isNotEmpty && mc != "0000") ||
-            (mid != null && mid.isNotEmpty) ||
-            (tid != null && tid.isNotEmpty)) {
-          _isMerchant = true;
-          _qrType = 'MERCHANT';
-
-          if (mc != null && mc.isNotEmpty && mc != "0000") {
-            _merchantCategory = _getMerchantCategory(mc);
+        // Merchant Logic
+        if (args != null && args.containsKey('isMerchant')) {
+          _isMerchant = args['isMerchant'] == true;
+          _merchantCategory = args['merchantType'];
+          if (_isMerchant) {
+            _qrType = 'MERCHANT';
+            if (_merchantCategory == null || _merchantCategory!.isEmpty) {
+              _merchantCategory = "Verified Merchant";
+            }
           } else {
-            _merchantCategory = "Verified Merchant";
+            _qrType = 'P2P';
+            _merchantCategory = "Personal Payment (P2P)";
           }
         } else {
-          _isMerchant = false;
-          _qrType = 'P2P';
-          _merchantCategory = "Personal Payment (P2P)";
+          final String? mc = uri.queryParameters['mc'];
+          final String? mid = uri.queryParameters['mid'];
+          final String? tid = uri.queryParameters['tid'];
+
+          if ((mc != null && mc.isNotEmpty && mc != "0000") ||
+              (mid != null && mid.isNotEmpty) ||
+              (tid != null && tid.isNotEmpty)) {
+            _isMerchant = true;
+            _qrType = 'MERCHANT';
+            if (mc != null && mc.isNotEmpty && mc != "0000") {
+              _merchantCategory = _getMerchantCategory(mc);
+            } else {
+              _merchantCategory = "Verified Merchant";
+            }
+          } else {
+            _isMerchant = false;
+            _qrType = 'P2P';
+            _merchantCategory = "Personal Payment (P2P)";
+          }
         }
       }
     } else {
       _upiId = args?['upiId'];
       _pn = args?['pn'];
-      _qrType = 'P2P'; // Manual entry is P2P
+      _qrType = 'P2P';
       _merchantCategory = "Personal Payment (P2P)";
     }
 
     if (_upiId != null) {
       _hasChecked = true;
-      // Only do contact checks for P2P or Number based UPIs
       if (!_isMerchant) {
         _performContactCheck();
       }
@@ -90,7 +101,6 @@ class _AmountScreenState extends State<AmountScreen> {
   }
 
   String _getMerchantCategory(String mc) {
-    // Standard MCC Mapping
     switch (mc) {
       case '8062':
       case '8011':
@@ -127,7 +137,6 @@ class _AmountScreenState extends State<AmountScreen> {
     _isNumberUpi = ContactService.startsWithNumber(_upiId!);
 
     if (_isNumberUpi) {
-      // Check contacts
       final contact = await ContactService.findContactByPhone(_upiId!);
       if (mounted) {
         setState(() {
@@ -135,11 +144,41 @@ class _AmountScreenState extends State<AmountScreen> {
         });
       }
     } else {
-      // Show popup for verification ONLY for non-number (alphabet) UPI IDs
-      // And only if it is NOT a verified merchant (already handled by _isMerchant flag skipping this function)
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showKnowledgePopup();
-      });
+      // Logic for Alphabet-based UPIs (Knowledge Check)
+
+      // Query Database History
+      final db = Provider.of<AppDatabase>(context, listen: false);
+      final history = await db.scannedQrDao.getScansByUpi(_upiId!);
+
+      // Check if ANY past scan was trusted
+      // (isInContacts means "We marked it as Known/Trusted" in our schema context for non-phone UPIs)
+      bool isTrusted = history.any((s) => s.isInContacts);
+      bool hasHistory = history.isNotEmpty;
+
+      if (isTrusted) {
+        // Case 1: User previously said "Yes I Know" (or clicked Known)
+        // Auto-verify silently
+        if (mounted) {
+          setState(() {
+            _userConfirmedKnowledge = true;
+            _showInlineVerification = false;
+          });
+        }
+      } else if (!hasHistory) {
+        // Case 2: First Time Interaction -> Show Popup
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _showKnowledgePopup();
+        });
+      } else {
+        // Case 3: Has history, but was marked "Unknown" previously
+        // Show the small inline buttons for re-decision
+        if (mounted) {
+          setState(() {
+            _showInlineVerification = true;
+            _userConfirmedKnowledge = false; // Default to unknown until clicked
+          });
+        }
+      }
     }
   }
 
@@ -191,7 +230,7 @@ class _AmountScreenState extends State<AmountScreen> {
       params['cu'] = 'INR';
       params['tr'] = tr;
       params['tn'] = tn;
-      params['pn'] = pn; // Update Name if needed
+      params['pn'] = pn;
 
       finalUriString = base.replace(queryParameters: params).toString();
     } else {
@@ -199,19 +238,13 @@ class _AmountScreenState extends State<AmountScreen> {
           "upi://pay?pa=$upiId&pn=${Uri.encodeComponent(pn)}&am=$amount&cu=INR&tr=$tr&tn=${Uri.encodeComponent(tn)}";
     }
 
-    // ---------------------------------------------------------
-    // CONDITIONAL FLOW: MERCHANT vs P2P
-    // ---------------------------------------------------------
-
     if (_isMerchant) {
-      // DIRECT REDIRECT - SKIP ML
       Navigator.pushNamed(
         context,
         '/redirect',
         arguments: {'upiUri': finalUriString, 'upiId': upiId, 'amount': amount},
       );
     } else {
-      // P2P - GO TO RISK SCREEN (Run ML)
       Navigator.pushNamed(
         context,
         '/risk',
@@ -231,7 +264,6 @@ class _AmountScreenState extends State<AmountScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Determine status color/icon based on Merchant vs P2P
     final Color statusColor = _isMerchant ? Colors.purple : Colors.blue;
     final IconData statusIcon = _isMerchant ? Icons.store : Icons.person;
 
@@ -239,7 +271,6 @@ class _AmountScreenState extends State<AmountScreen> {
       appBar: AppBar(title: const Text("Enter Amount"), centerTitle: true),
       body: CustomScrollView(
         slivers: [
-          // 1. SCROLLABLE CONTENT (Top)
           SliverPadding(
             padding: const EdgeInsets.only(
               left: 24.0,
@@ -252,7 +283,6 @@ class _AmountScreenState extends State<AmountScreen> {
                 children: [
                   const SizedBox(height: 10),
 
-                  // MERCHANT / TYPE INDICATOR
                   Container(
                     padding: const EdgeInsets.symmetric(
                       vertical: 8,
@@ -289,82 +319,197 @@ class _AmountScreenState extends State<AmountScreen> {
                       color: Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Row(
+                    child: Column(
                       children: [
-                        // Avatar
-                        CircleAvatar(
-                          backgroundColor: statusColor.withValues(alpha: 0.2),
-                          backgroundImage: (_matchedContact?.photo != null)
-                              ? MemoryImage(_matchedContact!.photo!)
-                              : null,
-                          radius: 28,
-                          child: (_matchedContact?.photo == null)
-                              ? Icon(
-                                  _isMerchant ? Icons.store : Icons.person,
-                                  color: statusColor,
-                                  size: 28,
-                                )
-                              : null,
-                        ),
-                        const SizedBox(width: 12),
-                        // Details
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: statusColor.withValues(
+                                alpha: 0.2,
+                              ),
+                              backgroundImage: (_matchedContact?.photo != null)
+                                  ? MemoryImage(_matchedContact!.photo!)
+                                  : null,
+                              radius: 28,
+                              child: (_matchedContact?.photo == null)
+                                  ? Icon(
+                                      _isMerchant ? Icons.store : Icons.person,
+                                      color: statusColor,
+                                      size: 28,
+                                    )
+                                  : null,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  Row(
+                                    children: [
+                                      Text(
+                                        "Paying to $_pn",
+                                        style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      if (_matchedContact != null) ...[
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.green.shade100,
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            "In Contacts",
+                                            style: TextStyle(
+                                              color: Colors.green.shade700,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
                                   Text(
-                                    "Paying to",
+                                    _matchedContact?.displayName ??
+                                        _pn ??
+                                        _upiId ??
+                                        "Receiver",
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    _upiId ?? "",
                                     style: TextStyle(
                                       color: Colors.grey.shade600,
                                       fontSize: 12,
                                     ),
                                   ),
-                                  if (_matchedContact != null) ...[
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        // Inline Verification Buttons (Knowledge Check for 2nd time users)
+                        if (_showInlineVerification && !_isMerchant) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.blue.withValues(alpha: 0.2),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  "Verify Recipient:",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Row(
+                                  children: [
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _userConfirmedKnowledge = false;
+                                          // It remains in 'Unknown' state, simple toggle for visual feedback if needed?
+                                          // Actually, button state should reflect current choice.
+                                        });
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: !_userConfirmedKnowledge
+                                              ? Colors.red.shade100
+                                              : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(
+                                            20,
+                                          ),
+                                          border: Border.all(
+                                            color: !_userConfirmedKnowledge
+                                                ? Colors.red
+                                                : Colors.grey,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          "Unknown",
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: !_userConfirmedKnowledge
+                                                ? Colors.red.shade800
+                                                : Colors.grey.shade700,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                     const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.green.shade100,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        "In Contacts",
-                                        style: TextStyle(
-                                          color: Colors.green.shade700,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _userConfirmedKnowledge = true;
+                                          // Once they click "Known", we could hide the buttons immediately
+                                          // or just show it selected. User asked: "if he give known there third time the small buttons should not be shown"
+                                          // So marking it true now means next time it won't show.
+                                        });
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: _userConfirmedKnowledge
+                                              ? Colors.green.shade100
+                                              : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(
+                                            20,
+                                          ),
+                                          border: Border.all(
+                                            color: _userConfirmedKnowledge
+                                                ? Colors.green
+                                                : Colors.grey,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          "Known",
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: _userConfirmedKnowledge
+                                                ? Colors.green.shade800
+                                                : Colors.grey.shade700,
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ],
-                                ],
-                              ),
-                              Text(
-                                _matchedContact?.displayName ??
-                                    _pn ??
-                                    _upiId ??
-                                    "Receiver",
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
                                 ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              Text(
-                                _upiId ?? "",
-                                style: TextStyle(
-                                  color: Colors.grey.shade600,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ).animate().slideY(begin: -0.5, end: 0),
@@ -403,7 +548,7 @@ class _AmountScreenState extends State<AmountScreen> {
             ),
           ),
 
-          // 2. STICKY FOOTER (Fills remaining space, button at bottom)
+          // 2. STICKY FOOTER
           SliverFillRemaining(
             hasScrollBody: false,
             child: Padding(
@@ -411,7 +556,7 @@ class _AmountScreenState extends State<AmountScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  const SizedBox(height: 40), // Minimum spacer
+                  const SizedBox(height: 40),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -426,7 +571,10 @@ class _AmountScreenState extends State<AmountScreen> {
                         _isMerchant
                             ? "Proceed to Pay (Secure)"
                             : "Analyze & Pay",
-                        style: const TextStyle(fontSize: 18),
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: _isMerchant ? Colors.white : null,
+                        ),
                       ),
                     ),
                   ).animate().slideY(begin: 1, end: 0),

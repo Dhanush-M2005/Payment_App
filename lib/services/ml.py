@@ -188,17 +188,26 @@ class AdaptiveFraudSystem:
             
             # A. High Value Comfort Analysis
             # Check if user has safely sent amounts similar or higher than current
-            safe_high_value_txns = history[
-                (history['amount'] >= 10000) & 
-                (history['label'] == 0) # Previously marked Safe
-            ]
+            # A. High Value Comfort Analysis
+            # Check if user has safely sent amounts similar or higher than current
+            # CRITICAL UPDATE: Only apply this trust if the CURRENT receiver is NOT new (or is in contacts).
+            # If sending to a NEW receiver, High Amount is ALWAYS risky, regardless of past spending habits.
             
-            # If current amount is high, but user does this often safely:
             amount_trust_factor = 0.0
             if current_txn['amount'] > 10000:
-                if len(safe_high_value_txns) >= 3: # Arbitrary threshold: done it 3 times safely
-                    print(" -> Pattern found: User makes safe high-value payments.")
-                    amount_trust_factor = 0.25 # Reduce fraud probability by 25%
+                # Check 1: Is the receiver known/safe?
+                if current_txn['is_new_receiver'] == 0 or current_txn['is_in_contacts'] == 1:
+                    
+                     safe_high_value_txns = history[
+                        (history['amount'] >= 10000) & 
+                        (history['label'] == 0) 
+                    ]
+                     
+                     if len(safe_high_value_txns) >= 3: 
+                        print(" -> Pattern found: User makes safe high-value payments to KNOWN parties.")
+                        amount_trust_factor = 0.25 
+                else:
+                    print(" -> High Amount to NEW Receiver. STRICT WARNING enforced.")
 
             # B. New Receiver Comfort Analysis
             # Check if user frequently pays new receivers safely
@@ -217,9 +226,30 @@ class AdaptiveFraudSystem:
                         print(" -> Pattern found: User trusts new receivers.")
                         receiver_trust_factor = 0.20 # Reduce fraud probability by 20%
 
+            # C. Known Receiver Amount Consistency
+            # If the receiver is NOT new, check if we have sent similar amounts to known receivers before.
+            # In a real production system, this would filter by the specific 'upi_id'. 
+            # With current features, we treat "all known receivers" as the history context.
+            
+            consistency_trust_factor = 0.0
+            if current_txn['is_new_receiver'] == 0:
+                # Get all safe payments to known receivers
+                safe_known_receiver_txns = history[
+                    (history['is_new_receiver'] == 0) & 
+                    (history['label'] == 0)
+                ]
+                
+                if len(safe_known_receiver_txns) > 0:
+                    max_past_amount = safe_known_receiver_txns['amount'].max()
+                    
+                    # Heuristic: If current amount is <= 1.5x the max previously sent to known receivers
+                    if current_txn['amount'] <= (max_past_amount * 1.5):
+                        print(f" -> Pattern found: Amount {current_txn['amount']} is within range of past known receiver payments (Max: {max_past_amount}).")
+                        consistency_trust_factor = 0.30 # Significant trust boost for consistent behavior
+                        
             # --- CALCULATE FINAL PERSONALIZED SCORE ---
             
-            adjusted_prob = base_prob - amount_trust_factor - receiver_trust_factor
+            adjusted_prob = base_prob - amount_trust_factor - receiver_trust_factor - consistency_trust_factor
             
             # Clamp between 0 and 1
             adjusted_prob = max(0.0, min(1.0, adjusted_prob))

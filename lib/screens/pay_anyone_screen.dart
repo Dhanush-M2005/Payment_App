@@ -43,8 +43,95 @@ class _PayAnyoneScreenState extends State<PayAnyoneScreen> {
     }
   }
 
+  // Helper method to map MCC to User-Friendly Category (Copied from ScanScreen)
+  String _getCategoryFromMc(String? mc) {
+    if (mc == null) return "Grocery/Retail";
+
+    switch (mc) {
+      case "8011":
+        return "Hospital";
+      case "5912":
+        return "Pharmacy";
+      case "5812":
+        return "Restaurant";
+      case "5411":
+        return "Grocery/Retail";
+      case "7011":
+        return "Hotel";
+      case "8249":
+        return "Education";
+      case "4111":
+        return "Transport";
+      default:
+        return "Grocery/Retail";
+    }
+  }
+
+  // Classify payment as Merchant or Personal (Copied & Adapted from ScanScreen)
+  Map<String, dynamic> _classifyPayment(String rawValue) {
+    Uri? uri = Uri.tryParse(rawValue);
+    // Robust parsing fallback
+    if (uri == null || !uri.hasQuery) {
+      uri = Uri.tryParse(rawValue.replaceFirst("upi://", "https://"));
+    }
+
+    final params = uri?.queryParameters ?? {};
+    final mc = params['mc'];
+    final mode = params['mode'];
+
+    // Logic to determine 'pa' (Payee Address / UPI ID)
+    String? pa = params['pa'];
+    // If not found in params, and input looks like a VPA, treat input as pa
+    if (pa == null && rawValue.contains('@') && !rawValue.contains('://')) {
+      pa = rawValue;
+    }
+
+    bool isMerchant = false;
+    String? merchantType;
+    String? detectionSource;
+
+    // CONDITION 1 (NPCI Standard – Highest Priority)
+    if (mc != null && mc.isNotEmpty) {
+      isMerchant = true;
+      merchantType = _getCategoryFromMc(mc);
+      detectionSource = "NPCI_MCC";
+    }
+    // CONDITION 2 (PhonePe / Google Pay Merchant)
+    else if (mode == "02") {
+      isMerchant = true;
+      merchantType = "Grocery/Retail"; // Fallback constant
+      detectionSource = "UPI_MODE";
+    }
+    // CONDITION 3 (Paytm Merchant Specific Rule)
+    else if (pa != null && pa.endsWith("@ptys")) {
+      isMerchant = true;
+      merchantType = "PAYTM_MERCHANT";
+      detectionSource = "PAYTM_HANDLE";
+    }
+    // CONDITION 4 (Fallback)
+    else {
+      isMerchant = false; // PERSONAL
+      detectionSource = "FALLBACK_PERSONAL";
+    }
+
+    // "if mcc does not exist keep it as grocery/retail"
+    if (isMerchant && merchantType == null) {
+      merchantType = "Grocery/Retail";
+    }
+
+    return {
+      'upiUri': rawValue,
+      'isMerchant': isMerchant,
+      'merchantType': merchantType,
+      'detectionSource': detectionSource,
+    };
+  }
+
   void _onPay(String upiId, String name) {
     if (upiId.isEmpty) return;
+
+    // Perform merchant check
+    final classification = _classifyPayment(upiId);
 
     Navigator.pushNamed(
       context,
@@ -53,7 +140,10 @@ class _PayAnyoneScreenState extends State<PayAnyoneScreen> {
         'upiId': upiId,
         'pn': name,
         'upiUri':
-            null, // Construct URI in AmountScreen if needed or just pass ID
+            classification['upiUri'], // Pass the raw value (could be URI or ID)
+        'isMerchant': classification['isMerchant'],
+        'merchantType': classification['merchantType'],
+        'detectionSource': classification['detectionSource'],
       },
     );
   }

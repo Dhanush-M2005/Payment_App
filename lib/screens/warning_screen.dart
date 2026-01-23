@@ -98,6 +98,13 @@ class WarningScreen extends StatelessWidget {
                       }
 
                       if (context.mounted) {
+                        // Ensure we are passing the data required by RedirectScreen
+                        // RedirectScreen expects: {'upiUri': '...'} and potentially others.
+                        // We simply forward the existing arguments (args), which should contain 'upiUri'.
+
+                        // Debug print to check if upiUri is present (will appear in terminal)
+                        // print("Proceeding to redirect with args: $args");
+
                         Navigator.pushReplacementNamed(
                           context,
                           '/redirect',
